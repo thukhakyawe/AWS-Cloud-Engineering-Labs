@@ -1,0 +1,227 @@
+
+Prompts
+
+Act as a Senior DevOps Engineer, AWS Solutions Architect, technical writer, and GitHub portfolio reviewer.
+
+I am building a public GitHub repository to document my hands-on AWS, DevOps, SRE, Linux, Terraform, Ansible, Docker, Kubernetes, CI/CD, and cloud engineering labs.
+
+Your task is to create or rewrite a complete, professional, beginner-friendly, and technically accurate README.md for the lab I provide.
+
+## 1. Most Important Requirement: Preserve Detailed Instructions
+
+**DO NOT oversimplify the README or replace detailed implementation instructions with a high-level summary.**
+
+My repository is intended to help other engineers reproduce the lab and understand how the technologies work.
+
+Include the actual implementation details, including:
+- Step-by-step instructions.
+- AWS Management Console navigation.
+- Complete terminal commands.
+- Configuration files.
+- Application source code where provided.
+- Terraform, Ansible, Docker, Kubernetes, or CI/CD configurations where applicable.
+- Environment variables and placeholders.
+- Explanations of commands and configuration settings.
+- Expected outputs and verification commands.
+- Troubleshooting instructions.
+
+Preserve the important technical content from my original lab notes. Improve the organization, clarity, grammar, security, and accuracy without unnecessarily removing implementation details.
+
+If the original content is too long, organize it into logical sections rather than shortening it into a summary.
+
+## 2. README.md Structure
+
+Adapt the following structure to the actual lab. Do not include irrelevant sections simply to fill the template.
+
+### 1. Title and Overview
+- Give the lab a clear, professional title.
+- Explain what the lab accomplishes.
+- Describe the problem the lab solves.
+- Explain why the technologies are useful in real-world engineering.
+
+### 2. Objectives
+List the practical skills and learning outcomes demonstrated by the lab.
+
+### 3. Architecture
+- Explain the architecture and components.
+- Include a Mermaid or ASCII architecture diagram when appropriate.
+- Explain how requests, data, or configurations flow between components.
+- Clearly distinguish the intended architecture from any components not actually implemented.
+
+### 4. Technologies Used
+Include a table describing each service, tool, or technology and its purpose.
+
+### 5. Prerequisites
+Describe the required accounts, permissions, software, resources, and foundational knowledge.
+
+### 6. Step-by-Step Implementation
+This is the most important section.
+
+Organize the lab into numbered steps. For each relevant step, include:
+
+**Objective:** Explain what this step accomplishes.
+
+**Instructions:** Provide exact AWS Console navigation or terminal commands.
+
+**Configuration:** Include the complete configuration files or source code needed to follow the lab. Do not replace lengthy code with phrases such as "insert your configuration here" when the original code is available.
+
+**Explanation:** Explain what the commands, configuration options, resources, and code do in beginner-friendly language.
+
+**Verification:** Show how to confirm the step succeeded, including commands and expected results where these can be established reliably.
+
+**Troubleshooting:** Explain likely errors, their causes, and practical diagnostic steps.
+
+Use copy-and-paste-ready code blocks whenever practical. Clearly identify which machine, directory, shell, or environment each command must run on.
+
+If a step involves multiple servers, clearly distinguish instructions for the frontend, backend, database, control node, or other relevant systems.
+
+### 7. Testing and Validation
+Explain how to test the completed implementation.
+
+Include:
+- Validation commands.
+- Expected behavior.
+- Health checks.
+- Connectivity tests.
+- Relevant monitoring or application outputs.
+
+Do not invent test results or claim that an implementation succeeded unless that result has been verified.
+
+### 8. Troubleshooting
+Provide a useful table containing:
+- Symptom.
+- Possible cause.
+- Diagnostic command or check.
+- Recommended solution.
+
+Focus on realistic problems associated with the technologies used in the lab.
+
+### 9. Security Best Practices
+Address relevant concerns, including:
+- IAM least privilege.
+- Credential and secret management.
+- Network security.
+- Secure configuration.
+- Package integrity.
+- Safe handling of public repositories.
+
+### 10. Cost Considerations
+For AWS labs, identify resources or services that could incur charges and explain how to control unnecessary costs.
+
+### 11. Cleanup
+Explain how to stop applications, remove temporary files, and delete or terminate lab resources where appropriate.
+
+Warn readers before destructive operations and distinguish disposable resources from shared resources.
+
+### 12. Key Takeaways
+Summarize the practical skills demonstrated by the lab and the engineering concepts learned.
+
+### 13. References
+Include official vendor documentation and relevant technical references.
+
+### 14. Disclaimer
+Briefly state that the lab is intended for learning and that configurations should be validated before production use.
+
+## 3. Technical Accuracy Requirements
+
+- Inspect the actual lab instructions and source code before writing.
+- Preserve the original lab's purpose, technologies, and workflow.
+- Correct obvious errors only when the correction is supported by technical reasoning or reliable documentation.
+- Verify version-specific commands, configuration options, and current service guidance when needed.
+- Use official documentation for AWS services and other technologies.
+- Identify assumptions and environment-specific requirements.
+- Clearly explain any important change made to the original implementation.
+- Never fabricate architecture components, successful tests, benchmark results, or screenshots.
+- Do not claim that code was executed or tested when it was not.
+- If the provided instructions contain a technical inconsistency, explain it and suggest a correction rather than silently reproducing a potentially broken solution.
+
+## 4. Code and Command Requirements
+
+- Preserve complete source code and relevant configuration files from the supplied materials.
+- Use valid Markdown code fences and appropriate language identifiers.
+- Keep commands in the correct execution order.
+- Explain important flags, arguments, environment variables, and configuration settings.
+- Use placeholders for values readers must obtain from their own environments.
+- Never hard-code secrets into source code or public documentation.
+- Distinguish actual expected results from illustrative examples.
+- Do not silently change software versions or APIs if that could alter the lab's behavior.
+- If a change is necessary, explain the reason and any compatibility implications.
+
+## 5. GitHub Portfolio Quality
+
+Write the README for two audiences:
+1. Beginners who want to reproduce the lab.
+2. Recruiters and experienced engineers evaluating my practical skills.
+
+The README must demonstrate:
+- Hands-on technical work.
+- Clear understanding of the architecture.
+- Practical implementation knowledge.
+- Troubleshooting and verification skills.
+- Security and operational awareness.
+
+Use professional Markdown formatting, informative headings, tables where useful, and diagrams when appropriate.
+
+Avoid excessive emojis, unnecessary repetition, generic explanations, and marketing language.
+
+Keep the content detailed enough to reproduce the lab without turning it into a vague project summary.
+
+## 6. Copyright and Attribution
+
+If the lab comes from a training platform or another author's materials:
+- Preserve the technical concepts needed to explain my own implementation.
+- Do not reproduce third-party documentation or proprietary lab instructions wholesale unless the applicable permission or license allows it.
+- Rewrite explanations in my own words.
+- Add attribution and links when appropriate.
+- Do not assume attribution alone grants redistribution rights.
+
+## 7. Input Materials
+
+Lab name:
+[INSERT LAB NAME]
+
+Technology stack:
+[INSERT TECHNOLOGIES]
+
+Original lab instructions, notes, commands, source code, or README:
+[PASTE THE ORIGINAL CONTENT OR PROVIDE THE FILE/URL]
+
+Additional requirements:
+[INSERT ANY SPECIAL REQUIREMENTS]
+
+## 8. Final Deliverable
+
+Produce a complete, polished README.md in Markdown.
+
+Before finalizing:
+1. Check that every important original implementation step has been retained.
+2. Check that no important source code or configuration has been unnecessarily omitted.
+3. Check the ordering of commands and dependencies.
+4. Check Markdown headings, tables, links, and code fences.
+5. Check security-sensitive values and replace them with appropriate placeholders.
+6. Check technical claims and identify anything that still needs to be tested.
+7. Ensure that the README explains both how to perform the lab and why each major step matters.
+
+**Do not provide only a README outline or a project summary. Deliver the complete README.md with detailed implementation instructions.**
+
+---
+
+How to use this prompt
+
+For each new lab, provide the prompt along with your original instructions, notes, code, or README.
+
+For example, you could write:
+
+Use my Master Prompt for AWS and DevOps Lab README.md.
+
+Lab name: Deploying a Static Website on Amazon S3 Using Terraform
+
+Technologies: AWS S3, Terraform, IAM, Git
+
+Original instructions: [Paste my lab notes or provide the original README.]
+
+Create a complete, detailed README.md with all implementation commands, Terraform configuration files, explanations, verification steps, troubleshooting, security considerations, and cleanup instructions.
+
+Preserve the implementation details. Do not summarize away the commands or code.
+
+If the original instructions contain errors, identify and correct them with explanations.
