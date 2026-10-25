@@ -1,0 +1,217 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: SRE Stress Lab
+Resources:
+  LabVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.98.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: SRELabVPC
+  LabSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref LabVPC
+      AvailabilityZone: !Select 
+        - 0
+        - !GetAZs ''
+      CidrBlock: 10.98.1.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: SRELabSubnet1
+  LabSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref LabVPC
+      AvailabilityZone: !Select 
+        - 1
+        - !GetAZs ''
+      CidrBlock: 10.98.2.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: SRELabSubnet2
+  LabIGW:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: SRELabIGW
+  LabAttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref LabVPC
+      InternetGatewayId: !Ref LabIGW
+  LabRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref LabVPC
+      Tags:
+        - Key: Name
+          Value: SRELabRouteTable
+  LabRoute:
+    Type: AWS::EC2::Route
+    DependsOn: LabAttachGateway
+    Properties:
+      RouteTableId: !Ref LabRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref LabIGW
+  LabSubnet1RouteTableAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref LabSubnet1
+      RouteTableId: !Ref LabRouteTable
+  LabSubnet2RouteTableAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref LabSubnet2
+      RouteTableId: !Ref LabRouteTable
+  EC2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref EC2InstanceRole
+  BackendSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Backend SG
+      VpcId: !Ref LabVPC
+  FrontendSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Frontend SG
+      VpcId: !Ref LabVPC
+  RdsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow 5432 from Backend
+      VpcId: !Ref LabVPC
+  BackendAllowFromFrontend:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref BackendSecurityGroup
+      IpProtocol: tcp
+      FromPort: 8080
+      ToPort: 8080
+      SourceSecurityGroupId: !Ref FrontendSecurityGroup
+  FrontendAllowFromBackend:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref FrontendSecurityGroup
+      IpProtocol: tcp
+      FromPort: 3000
+      ToPort: 3000
+      SourceSecurityGroupId: !Ref BackendSecurityGroup
+  RdsAllowFromBackend:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref RdsSecurityGroup
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      SourceSecurityGroupId: !Ref BackendSecurityGroup
+  BackendInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: m3.medium
+      ImageId: !Sub >-
+        {{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}}
+      SubnetId: !Ref LabSubnet1
+      SecurityGroupIds:
+        - !Ref BackendSecurityGroup
+      IamInstanceProfile: !Ref EC2InstanceProfile
+      Tags:
+        - Key: Name
+          Value: SRELab-Backend
+      MetadataOptions:
+        HttpTokens: optional
+        HttpEndpoint: enabled
+  FrontendInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t3.micro
+      ImageId: !Sub >-
+        {{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}}
+      SubnetId: !Ref LabSubnet1
+      SecurityGroupIds:
+        - !Ref FrontendSecurityGroup
+      IamInstanceProfile: !Ref EC2InstanceProfile
+      Tags:
+        - Key: Name
+          Value: SRELab-Frontend
+      CreditSpecification:
+        CPUCredits: Standard
+      MetadataOptions:
+        HttpTokens: optional
+        HttpEndpoint: enabled
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: SRE Lab Subnet Group
+      SubnetIds:
+        - !Ref LabSubnet1
+        - !Ref LabSubnet2
+      DBSubnetGroupName: !Sub ${AWS::StackName}-dbsubnet
+  RDSInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      Engine: postgres
+      DBInstanceClass: db.t3.micro
+      AllocatedStorage: 20
+      StorageType: gp2
+      MultiAZ: false
+      PubliclyAccessible: false
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VPCSecurityGroups:
+        - !Ref RdsSecurityGroup
+      MasterUsername: labuser
+      MasterUserPassword: LabPass1234
+      DBName: labdb
+      DeletionProtection: false
+    DeletionPolicy: Snapshot
+Outputs:
+  BackendInstanceId:
+    Description: Backend EC2 Instance ID
+    Value: !Ref BackendInstance
+  FrontendInstanceId:
+    Description: Frontend EC2 Instance ID
+    Value: !Ref FrontendInstance
+  RDSEndpoint:
+    Description: RDS PostgreSQL endpoint address
+    Value: !GetAtt RDSInstance.Endpoint.Address
+  RDSDBName:
+    Description: Database name
+    Value: labdb
+  RDSMasterUsername:
+    Description: Database username
+    Value: labuser
+  RDSMasterPassword:
+    Description: Database password
+    Value: LabPass1234
+  LabVPCId:
+    Description: VPC Id of the lab
+    Value: !Ref LabVPC
+  LabSubnet1Id:
+    Description: Subnet 1 Id
+    Value: !Ref LabSubnet1
+  LabSubnet2Id:
+    Description: Subnet 2 Id
+    Value: !Ref LabSubnet2
