@@ -850,3 +850,256 @@ Questions to investigate:
 
 ---
 
+
+## Step 10: Explore End-to-End Tracing
+
+This lab uses the X-Ray SDK and daemon to demonstrate distributed tracing. Confirm that the application instrumentation, trace collection process, IAM permissions, and network access are configured.
+
+1. Open the X-Ray or CloudWatch application monitoring views available in your AWS account.
+2. Open Trace Map or the current service visualization available in your console.
+3. Generate requests by calling the frontend endpoints.
+4. Select a service node and inspect its trace details.
+5. Find a trace for a frontend request that called the backend.
+6. Compare frontend and backend timing with CloudWatch metrics and application logs for the same time window.
+
+Tracing helps show where request time is spent across service boundaries. A missing trace may be caused by sampling, SDK configuration, insufficient permissions, a stopped daemon, blocked network traffic, or a request that was not sampled.
+
+**Migration note:** AWS recommends migration from X-Ray SDK instrumentation to OpenTelemetry-based instrumentation. See the references at the end of this README before choosing tracing technology for a new project. This exercise retains X-Ray steps to match the original lab.
+
+---
+
+## Step 11: Run Taurus/JMeter Load Tests
+
+Taurus (bzt) describes performance tests in YAML and can launch JMeter. These examples target the backend directly, so run them on the backend EC2 instance where localhost:8080 points to the Java service.
+
+### 11.1 Install prerequisites
+
+On the backend instance:
+
+~~~bash
+sudo dnf install -y java-17-amazon-corretto maven git python3-pip
+java -version
+python3 --version
+~~~
+
+A Python virtual environment keeps Taurus dependencies separate from system-managed Python packages:
+
+~~~bash
+python3 -m venv ~/taurus-venv
+source ~/taurus-venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install bzt
+bzt --version
+~~~
+
+If virtual-environment creation fails, install the operating-system package needed to create virtual environments or follow the installation method supported by the AMI. Do not force pip packages into the system Python installation.
+
+The first Taurus run may download JMeter and related files. Ensure the instance has sufficient disk space and permitted outbound access.
+
+### 11.2 Create the test directory
+
+~~~bash
+mkdir -p ~/taurus
+cd ~/taurus
+~~~
+
+### 11.3 Create cpu_load.yml
+
+~~~bash
+cat <<'EOF' > ~/taurus/cpu_load.yml
+execution:
+  - executor: "jmeter"
+    concurrency: 10
+    ramp-up: 10s
+    hold-for: 1m
+    scenario: "cpu_scenario"
+
+scenarios:
+  cpu_scenario:
+    default-address: "http://localhost:8080"
+    requests:
+      - "/cpu"
+EOF
+~~~
+
+Configuration explanation:
+
+- executor selects JMeter as the test engine.
+- concurrency requests ten concurrent virtual users.
+- ramp-up spreads the ramp-up across ten seconds.
+- hold-for specifies a one-minute hold period after ramp-up.
+- default-address sets the backend host and port.
+- requests lists the endpoint called by the scenario.
+
+Because /cpu intentionally performs CPU work, this test can increase CPU utilization substantially. Lower the concurrency if needed.
+
+### 11.4 Create db_load.yml
+
+~~~bash
+cat <<'EOF' > ~/taurus/db_load.yml
+execution:
+  - executor: "jmeter"
+    concurrency: 5
+    ramp-up: 5s
+    hold-for: 2m
+    scenario: "db_scenario"
+
+scenarios:
+  db_scenario:
+    default-address: "http://localhost:8080"
+    requests:
+      - "/db"
+EOF
+~~~
+
+This scenario uses five concurrent virtual users against the database endpoint. The actual request count and database load depend on how quickly requests complete and how Taurus/JMeter schedules them.
+
+### 11.5 Run the CPU test
+
+Make sure the backend service is running, then execute:
+
+~~~bash
+source ~/taurus-venv/bin/activate
+cd ~/taurus
+bzt cpu_load.yml
+~~~
+
+Watch the CloudWatch dashboard while the test runs. Review the Taurus summary for throughput, latency, and errors. Do not assume a fixed response time; measure the result in your environment.
+
+### 11.6 Run the database test
+
+~~~bash
+source ~/taurus-venv/bin/activate
+cd ~/taurus
+bzt db_load.yml
+~~~
+
+Compare the result with:
+
+- Backend CPU utilization.
+- RDS CPU utilization and other available database metrics.
+- Backend application logs.
+- X-Ray traces, if they are being collected.
+- Request latency, throughput, and error counts.
+
+### 11.7 Interpret the results
+
+Ask these questions:
+
+- Does the CPU endpoint increase backend CPU utilization?
+- Does the database endpoint increase RDS activity or latency?
+- At what concurrency level do errors or latency begin increasing?
+- Do trace segments suggest time is spent in the backend or its database dependency?
+- Do logs show connection failures, timeouts, or resource exhaustion?
+- Which additional metric would make the root cause easier to identify?
+
+Record only results you actually measured. Do not publish fabricated performance figures.
+
+---
+
+## Troubleshooting
+
+| Symptom | Possible Cause | What to Check |
+|---|---|---|
+| Session Manager cannot connect | Instance is not managed by Systems Manager, agent is unhealthy, or permissions/network access are missing | SSM Agent, instance profile, Systems Manager connectivity, Session Manager setup |
+| CloudWatch Agent fails to start | Invalid JSON, wrong configuration path, unsupported settings, or missing permissions | Validate JSON, inspect agent logs, verify instance role |
+| CloudWatch log group is empty | File is missing, path differs, permissions prevent reads, or the agent uses another config | Check app log path, agent status, and file contents |
+| CWAgent metrics are missing | Agent configuration or publishing permissions are incorrect | Check agent logs, namespace, dimensions, and IAM role |
+| Maven build fails | Java mismatch, source error, repository access issue, or dependency failure | Inspect the first Maven error and check Java/Maven versions |
+| Backend /db fails | Wrong endpoint or credentials, database is down, or network is blocked | Check DB variables, RDS status, security group, routes, and backend logs |
+| Frontend cannot reach backend | Wrong private IP/port, backend process stopped, or security group blocks traffic | Check BACKEND_HOST, process status, listener port, and security rules |
+| Port already in use | Another application process is running | Use pgrep and inspect logs before starting another copy |
+| No X-Ray traces appear | Sampling, SDK configuration, permissions, or trace collector issue | Check application instrumentation, daemon/collector, permissions, and sampling |
+| Alarm does not trigger | Threshold not crossed, wrong resource dimension, unsupported period, or too few samples | Check metric graph, resolution, threshold, evaluation periods, and resource |
+| bzt command not found | Virtual environment is inactive or executable is not on PATH | Run source ~/taurus-venv/bin/activate and which bzt |
+| Load test returns errors | Service overload, database limitations, invalid URL, or connection timeout | Review test output, app logs, traces, CPU, and database metrics |
+
+Useful logs and process checks:
+
+~~~bash
+# Backend application
+tail -n 100 ~/backend/backend.log
+
+# Frontend application
+tail -n 100 ~/frontend/frontend.log
+
+# CloudWatch Agent
+sudo tail -n 100 /opt/aws/amazon-cloudwatch-agent/logs/amazon-cloudwatch-agent.log
+
+# Application process checks
+pgrep -af 'backendservice-1.0-SNAPSHOT.jar'
+pgrep -af 'node index.js'
+
+# X-Ray service status on a systemd-based AMI
+sudo systemctl status xray
+~~~
+
+---
+
+## Security, Reliability, and Cost Notes
+
+- Use least-privilege IAM permissions.
+- Prefer Session Manager for shell access; avoid exposing SSH broadly.
+- Keep database credentials out of source code and Git history.
+- Use runtime secret injection or an approved secret-management service.
+- Restrict security group ingress to authorized sources and required ports.
+- Run load tests only against systems you own or are explicitly authorized to test.
+- Increase workload gradually and stop if the service becomes unhealthy.
+- CloudWatch custom metrics, log ingestion and retention, detailed monitoring, trace ingestion, SNS, EC2, RDS, and data transfer may incur charges.
+- Review AWS pricing and clean up resources after the lab.
+- Treat the sample applications as lab code. Production use requires suitable secrets management, timeouts, input validation, error handling, process supervision, health checks, and security controls.
+- The original lab uses legacy X-Ray SDK/daemon instrumentation. Follow current AWS guidance when selecting tracing technology for new applications.
+
+## Cleanup
+
+When testing is complete:
+
+1. Stop load generators and confirm Taurus, ApacheBench, and stress processes have ended.
+2. Stop the lab applications if they are no longer needed. Inspect process details before terminating them.
+3. Save any measurements or screenshots you want to keep.
+4. Review CloudWatch dashboards, alarms, SNS topics/subscriptions, and log groups created for the exercise.
+5. Stop or terminate EC2 instances and remove the database or other provisioned resources only according to the lab provider's cleanup instructions.
+6. Check the AWS console and cost tools to make sure no unneeded chargeable resources remain.
+
+Do not delete shared or managed resources unless the lab explicitly authorizes it.
+
+## Results and Learning Notes
+
+Use this table to record results actually observed in your environment. Add screenshots of your own dashboard or trace map if allowed.
+
+| Experiment | Workload to Record | Metrics / Output | Findings |
+|---|---|---|---|
+| Backend CPU | Worker count and duration | CPU utilization, response output, alarm state | Fill in after testing |
+| Frontend CPU | Worker count and duration | CPU utilization and response output | Fill in after testing |
+| Database endpoint | Concurrency and duration | RDS metrics, backend latency, errors | Fill in after testing |
+| HTTP benchmark | Total requests and concurrency | Throughput, latency percentiles, failed requests | Fill in after testing |
+| Distributed tracing | Endpoint and test time window | Trace segments and service latency | Fill in after testing |
+
+### Key Takeaways
+
+This lab demonstrates how performance testing and observability complement one another:
+
+- **Metrics** show resource utilization and performance trends.
+- **Logs** provide event and error context.
+- **Traces** help locate latency across service boundaries.
+- **Load tests** show how an application behaves under controlled demand.
+- **Alarms** notify operators when configured conditions are met.
+
+Correlating all these signals is usually more useful than interpreting any single metric in isolation.
+
+## References
+
+- [Amazon EC2 documentation](https://docs.aws.amazon.com/ec2/)
+- [AWS Systems Manager Session Manager](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager.html)
+- [Amazon CloudWatch documentation](https://docs.aws.amazon.com/cloudwatch/)
+- [CloudWatch Agent configuration](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Agent-Configuration-File-Details.html)
+- [AWS X-Ray SDK and daemon support timeline](https://docs.aws.amazon.com/xray/latest/devguide/xray-sdk-daemon-timeline.html)
+- [Migrating from X-Ray instrumentation to OpenTelemetry](https://docs.aws.amazon.com/xray/latest/devguide/xray-sdk-migration.html)
+- [Amazon SNS documentation](https://docs.aws.amazon.com/sns/)
+- [Apache Maven](https://maven.apache.org/)
+- [ApacheBench documentation](https://httpd.apache.org/docs/2.4/programs/ab.html)
+- [Taurus documentation](https://gettaurus.org/)
+
+## Disclaimer
+
+This README documents a hands-on learning lab. Validate commands and configurations in the target environment before using them elsewhere. Software versions, AWS console navigation, available metrics, performance results, and prices can change. The existing folder path still contains “Chef Solo” in its name; the content here documents stress testing and observability.
