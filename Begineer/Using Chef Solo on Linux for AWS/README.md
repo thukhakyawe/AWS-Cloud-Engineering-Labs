@@ -581,3 +581,272 @@ Expected behavior:
 
 If the frontend cannot call the backend, inspect BACKEND_HOST, BACKEND_PORT, the backend log, and the security group rules.
 
+
+## Step 5: Restart Applications After Reconnecting
+
+Environment variables do not automatically return in a new Session Manager shell. Re-enter the values before starting the applications again.
+
+### On the backend instance
+
+~~~bash
+cd ~/backend
+export DB_HOST="<your-rds-endpoint>"
+export DB_NAME="<your-database-name>"
+export DB_USER="<your-database-username>"
+read -s -p "Database password: " DB_PASS
+echo
+export DB_PASS
+pgrep -af 'backendservice-1.0-SNAPSHOT.jar'
+~~~
+
+If the backend is not already running, start it:
+
+~~~bash
+nohup java -jar target/backendservice-1.0-SNAPSHOT.jar > backend.log 2>&1 &
+~~~
+
+Verify:
+
+~~~bash
+curl -i http://localhost:8080/cpu
+curl -i http://localhost:8080/db
+~~~
+
+### On the frontend instance
+
+~~~bash
+cd ~/frontend
+export BACKEND_HOST="<backend-private-ip>"
+export BACKEND_PORT="8080"
+pgrep -af 'node index.js'
+~~~
+
+If the frontend is not running, start it:
+
+~~~bash
+nohup node index.js > frontend.log 2>&1 &
+~~~
+
+Verify:
+
+~~~bash
+curl -i http://localhost:3000/work/cpu
+curl -i http://localhost:3000/work/db
+~~~
+
+Check for an existing process before starting another copy; duplicate processes can fail when the port is already in use.
+
+---
+
+## Step 6: Create a CloudWatch Dashboard
+
+### 6.1 Confirm that metrics are arriving
+
+1. Open CloudWatch in the AWS console.
+2. Select Metrics and then the CWAgent namespace.
+3. Confirm that metrics exist for the current frontend and backend instances.
+4. Open Log groups and check for the configured application log groups.
+5. If data is missing, confirm that the agent is running, the IAM role allows publishing, and the configured file paths exist.
+
+### 6.2 Create the dashboard
+
+1. Open CloudWatch → Dashboards.
+2. Select Create dashboard.
+3. Enter a name such as StressTestDashboard.
+4. Add metric widgets, then save the dashboard after arranging them.
+
+### 6.3 Add CloudWatch Agent metrics
+
+1. Add a metric widget and select the CWAgent namespace.
+2. Select the current frontend and backend instances using the dimensions available in your configuration.
+3. Add memory, swap, and disk utilization metrics.
+4. Use a descriptive widget title such as Host Memory and Disk Utilization.
+
+Metric names and dimensions depend on the agent configuration and operating system.
+
+### 6.4 Add EC2 CPU utilization
+
+1. Add a widget and choose EC2 → Per-Instance Metrics.
+2. Select CPUUtilization for the current frontend and backend instances.
+3. Use the same statistic and period when comparing their behavior.
+4. Save the widget.
+
+### 6.5 Add CPU credit metrics where applicable
+
+CPU credit metrics are available only for supported burstable EC2 instance families. If your lab uses an eligible T-series instance:
+
+1. Add a widget for the relevant EC2 instance.
+2. Select available metrics such as CPUCreditBalance and CPUCreditUsage.
+3. Save the widget and compare these metrics during the stress test.
+
+A CPU credit represents one vCPU running at 100% utilization for one minute. Behavior at the baseline and when credits are exhausted depends on the instance family and operating mode. Do not assume every EC2 instance uses CPU credits.
+
+### 6.6 Add RDS metrics
+
+1. Add a metric widget and select the AWS/RDS namespace.
+2. Select the database instance identifier for the lab.
+3. Add applicable metrics such as CPUUtilization, ReadLatency, WriteLatency, and BurstBalance where available.
+4. Add any CPU credit metrics only if supported by the RDS instance class.
+5. Save the widget.
+
+Available metrics depend on the RDS engine, storage, instance class, and monitoring configuration.
+
+### 6.7 Choose appropriate metric periods
+
+Standard EC2 and RDS metrics commonly have one-minute resolution depending on monitoring settings. Use a period supported by the selected metric. A one-second dashboard period does not create one-second data if the metric is published only once per minute.
+
+Use Average to understand typical behavior, and Maximum to identify peaks within the chosen aggregation period. High-resolution custom metrics require appropriate collection settings and can add costs.
+
+Enable EC2 detailed monitoring only if the exercise needs it and you understand the additional charge.
+
+**Verification:** Run a short load test and confirm the correct graph changes for the current instance, not a previously terminated instance.
+
+---
+
+## Step 7: Create a CloudWatch Alarm and SNS Email Notification
+
+The threshold below is an example for a lab, not a production alerting recommendation.
+
+### 7.1 Create the alarm
+
+1. Open CloudWatch → Alarms, or select the CPU metric from your dashboard.
+2. Choose CPUUtilization for the current backend instance.
+3. Configure a threshold, for example CPU utilization greater than 50%.
+4. Select the metric period and evaluation periods supported by its resolution.
+5. Review the metric graph and alarm conditions.
+
+A 10-second evaluation period may not be appropriate for a standard one-minute metric. Use a period that matches the selected metric's resolution.
+
+### 7.2 Configure SNS
+
+1. Add an alarm notification action.
+2. Create or select an SNS topic, for example SREtest.
+3. Add an email address you can access.
+4. Save the topic and alarm settings.
+5. Open your inbox and confirm the SNS subscription.
+6. Return to the alarm wizard and complete alarm creation.
+
+### 7.3 Verify the alarm
+
+1. Run the short CPU test in Step 8.
+2. Observe the metric and alarm state.
+3. Confirm that the alarm changes state only when the configured condition is met.
+4. Check the destination inbox if a notification should have been sent.
+
+An alarm in INSUFFICIENT_DATA may need more metric samples. Verify the resource dimension, metric resolution, threshold, evaluation period, and permissions before changing the alarm.
+
+---
+
+## Step 8: Stress Test the Backend Instance
+
+Run these tests only on authorized lab instances. Start small, observe the result, and increase load gradually.
+
+### 8.1 Install the stress utility
+
+On the backend instance:
+
+~~~bash
+sudo dnf install -y stress
+stress --version
+~~~
+
+If the package is unavailable for the provided AMI, use the installation method supported by that operating system.
+
+### 8.2 Run a short CPU test
+
+~~~bash
+stress --cpu 2 --timeout 60
+~~~
+
+Explanation:
+
+- --cpu 2 starts two CPU workers.
+- --timeout 60 stops the test after 60 seconds.
+
+### 8.3 Observe metrics and logs
+
+While the command runs:
+
+1. Watch backend CPUUtilization in the CloudWatch dashboard.
+2. Check CPU credit metrics if the instance type supports them.
+3. Observe any alarm state changes.
+4. Compare the metric before, during, and after the test.
+5. Review the application and CloudWatch Agent logs if expected data is absent.
+
+### 8.4 Increase the workload carefully
+
+After reviewing the first test, you may run a slightly larger lab workload:
+
+~~~bash
+stress --cpu 4 --timeout 120
+~~~
+
+Adjust the worker count to the instance size and lab conditions. The goal is to observe the response, not to exhaust resources.
+
+---
+
+## Step 9: Stress Test the Frontend and Generate HTTP Load
+
+### 9.1 Run a frontend CPU test
+
+On the frontend instance:
+
+~~~bash
+stress --cpu 2 --timeout 60
+~~~
+
+Observe the frontend CPU metric during the test.
+
+### 9.2 Send a database request through the frontend
+
+~~~bash
+curl -i http://localhost:3000/work/db
+~~~
+
+The request flows through frontend → backend → RDS. Compare frontend and backend logs, traces, and database metrics for the same time window.
+
+### 9.3 Install ApacheBench and run a small benchmark
+
+~~~bash
+sudo dnf install -y httpd-tools
+ab -n 1000 -c 10 http://localhost:3000/work/db
+~~~
+
+Explanation:
+
+- -n 1000 sends 1,000 total requests.
+- -c 10 allows up to 10 concurrent requests.
+- The URL targets the frontend endpoint that calls the backend database route.
+
+ApacheBench reports request throughput, timing statistics, and failed requests. Results depend on the instance size, database performance, network, and application implementation.
+
+### 9.4 Increase workload only when safe
+
+The original lab contains longer and much higher-concurrency tests, such as dozens of CPU workers, long durations, and 100,000 HTTP requests. These can saturate instances, overwhelm a database, interrupt other learners, and create charges.
+
+Do not run the largest tests by default. Increase request counts, concurrency, and duration gradually. Stop the test if the service becomes unhealthy or if costs exceed the lab budget.
+
+For a controlled follow-up test, use a moderate workload such as:
+
+~~~bash
+stress --cpu 4 --timeout 120
+ab -n 5000 -c 10 http://localhost:3000/work/db
+~~~
+
+Only run higher values when the lab is isolated, authorized, and designed to handle that level of load.
+
+### 9.5 Analyze CPU credits and bottlenecks
+
+On eligible burstable instances, sustained CPU demand may reduce available credits. The behavior after credits are depleted depends on instance type and operating mode. Correlate credit metrics with CPU utilization, response latency, error counts, and database metrics.
+
+Questions to investigate:
+
+- Does frontend CPU rise during the frontend CPU test?
+- Does backend CPU rise when requests call /work/db?
+- Does RDS CPU utilization or database latency change?
+- Do response times increase as concurrency increases?
+- Does the application return errors when a resource is saturated?
+- Can logs and traces distinguish frontend processing from backend and database latency?
+
+---
+
