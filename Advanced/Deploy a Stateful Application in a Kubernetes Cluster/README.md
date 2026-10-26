@@ -740,3 +740,257 @@ If the load balancer was just created, it may take time for targets to register 
 
 This step demonstrated direct access to the primary using stable DNS, reads through a Service, node draining, Pod recovery, scaling from three to five replicas, persistent volume claim behavior, and optional load balancer provisioning.
 
+
+## Step 5: Monitor the Cluster with Kubernetes Dashboard
+
+The training cluster includes Kubernetes Dashboard resources in the kubernetes-dashboard namespace. Dashboard provides a graphical view of resources such as Pods, StatefulSets, Services, and PersistentVolumes.
+
+### 5.1 Create a Dashboard service account for the lab
+
+**Security warning:** The original training exercise binds the cluster-admin role, which grants broad privileges across the cluster. Use this only in the disposable lab. For real environments, use the least-privilege role needed for the task and a supported authentication approach.
+
+Create the service account and binding manifest:
+
+~~~bash
+cat <<'EOF' > dashboard-admin.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dashboard-admin
+  namespace: kubernetes-dashboard
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: dashboard-admin
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+- kind: ServiceAccount
+  name: dashboard-admin
+  namespace: kubernetes-dashboard
+EOF
+~~~
+
+Apply the resources:
+
+~~~bash
+kubectl apply -f dashboard-admin.yaml
+kubectl get serviceaccount dashboard-admin -n kubernetes-dashboard
+kubectl get clusterrolebinding dashboard-admin
+~~~
+
+### 5.2 Generate a login token
+
+~~~bash
+kubectl -n kubernetes-dashboard create token dashboard-admin
+~~~
+
+Copy the token into a secure temporary note for this lab session only. Treat it as an administrator credential. Do not add it to the README, commit it to Git, or reuse it outside this training environment.
+
+### 5.3 Forward the Dashboard port
+
+The Dashboard Service usually serves HTTPS on port 443. A safer default is to bind the forward to the bastion's loopback interface:
+
+~~~bash
+kubectl port-forward -n kubernetes-dashboard --address 127.0.0.1 service/kubernetes-dashboard 8001:443
+~~~
+
+Keep this command running. If you access the bastion from your own computer, create an SSH tunnel from your computer to the bastion in a separate local terminal:
+
+~~~bash
+ssh -L 8001:127.0.0.1:8001 ubuntu@<bastion-public-ip>
+~~~
+
+Then open the Dashboard URL through the local tunnel at https://localhost:8001, assuming the SSH connection and port-forward are active. Use the bastion host and authentication options provided by the lab platform.
+
+**Training-platform alternative:** Some hosted labs expect the port-forward to listen on the bastion's network interfaces and then ask you to open the Dashboard using the bastion address. If the lab requires this workflow, use it only in the disposable environment and restrict inbound port 8001 in the bastion security group to your own client IP. Do not expose the port to all addresses.
+
+~~~bash
+kubectl port-forward -n kubernetes-dashboard --address 0.0.0.0 service/kubernetes-dashboard 8001:443
+~~~
+
+A browser warning may appear when the lab uses a self-signed TLS certificate. Do not ignore certificate warnings on production or other untrusted systems. For the isolated lab, follow the training provider's documented way to access the temporary Dashboard endpoint.
+
+### 5.4 Sign in to Dashboard
+
+1. Open the Dashboard endpoint through the port-forward or SSH tunnel.
+2. Select token-based authentication if the UI asks for an authentication method.
+3. Paste the token generated in Step 5.2.
+4. Sign in and inspect the workloads.
+
+Do not paste the token into the README, a screenshot, a shared terminal transcript, or another public location.
+
+### 5.5 Inspect StatefulSets and scale down
+
+1. In the Dashboard, navigate to Workloads and then Stateful Sets.
+2. Open the mysql StatefulSet.
+3. Review Pod status, CPU and memory metrics if metrics-server is available, and the number of replicas.
+4. Use Scale to change desired replicas from five back to three.
+5. Confirm that mysql-4 and then mysql-3 are removed in reverse ordinal order.
+
+You can do the same operation with kubectl:
+
+~~~bash
+kubectl scale statefulset mysql --replicas=3
+kubectl get pods -l app=mysql --watch
+~~~
+
+Press Ctrl+C after you have observed the scale-down.
+
+### 5.6 Inspect PersistentVolumes after scale-down
+
+Navigate in Dashboard to Cluster → Persistent Volumes. The lab may show PVs that remain after scaling down. StatefulSet PVC retention and the StorageClass reclaim policy affect what happens to claims and backing volumes. A Pod being removed does not imply that its storage is immediately deleted.
+
+Inspect the storage state from the shell:
+
+~~~bash
+kubectl get pvc
+kubectl get pv
+kubectl describe pvc data-mysql-4
+~~~
+
+If the lab asks you to remove the unused storage for mysql-4, first verify that the claim is no longer needed and identify its bound PV. Deleting a PVC can cause data loss and, depending on the PV reclaim policy, may delete the backing EBS volume.
+
+In the Dashboard, the original exercise attempts to delete the PV before its claim; Kubernetes will not normally delete a PV while it is still bound to a PVC. To remove the unused claim and test the lifecycle:
+
+~~~bash
+kubectl delete pvc data-mysql-4
+kubectl get pvc
+kubectl get pv
+~~~
+
+Only perform this deletion for the disposable lab after confirming the data is no longer needed. If the reclaim policy is Retain, the EBS-backed PV may remain and require a separate, deliberate cleanup procedure. If the policy is Delete, deleting the claim may also delete the backing volume.
+
+### 5.7 Remove temporary Dashboard privileges
+
+After finishing the Dashboard exercise, remove the broad role binding and the service account created for this lab:
+
+~~~bash
+kubectl delete clusterrolebinding dashboard-admin
+kubectl delete serviceaccount dashboard-admin -n kubernetes-dashboard
+~~~
+
+Stop the port-forward with Ctrl+C in the terminal where it is running. If you opened port 8001 in a security group for this lab, remove that inbound rule.
+
+### Step 5 Summary
+
+You used Kubernetes Dashboard to inspect workloads and storage, scale a StatefulSet, and review PersistentVolumes. You also saw why Dashboard authentication, RBAC, network exposure, and storage cleanup require care.
+
+---
+
+## Troubleshooting
+
+| Symptom | Possible cause | Checks |
+|---|---|---|
+| kubectl cannot connect to the API server | Cluster is still provisioning, kubeconfig is wrong, or API server is unavailable | Check lab readiness, current context, node status, and control-plane logs |
+| Worker node is NotReady | Node provisioning, CNI, kubelet, or resource issue | kubectl describe node <node-name>; inspect system Pods |
+| Pod is Pending | PVC unbound, storage capacity/zone mismatch, insufficient CPU or memory | kubectl describe pod <pod-name>; kubectl get pvc; check Events |
+| Pod is stuck in Init | Image pull failure, ConfigMap missing, data clone failure, or previous peer unavailable | kubectl describe pod <pod-name>; inspect init container logs |
+| Pod is CrashLoopBackOff | MySQL configuration issue, failed probe, missing storage, or incompatible image | kubectl logs <pod-name> -c mysql; kubectl describe pod <pod-name> |
+| PVC is Pending | StorageClass provisioner unavailable, AWS permissions absent, or CSI driver missing | kubectl describe pvc <claim-name>; kubectl get storageclass; inspect EBS CSI Pods |
+| MySQL read query fails | Service endpoints not ready, DNS failure, replica not initialized, or authentication mismatch | kubectl get endpoints mysql-read; test mysql-0.mysql; inspect container logs |
+| New replica lacks data | Clone or asynchronous replication not complete or failed | Inspect xtrabackup and mysql container logs and replication status |
+| Node drain is blocked | PodDisruptionBudget, unmanaged Pod, or other eviction restriction | Read the drain error and inspect the affected Pod's owner and disruption policy |
+| LoadBalancer hostname is empty | Provisioning is pending or AWS integration lacks permissions/support | kubectl describe service mysql-read; inspect events and cloud-controller logs |
+| Dashboard is unreachable | Port-forward stopped, wrong port/tunnel, or network rule missing | Check port-forward output, SSH tunnel, security group, and service endpoints |
+| Dashboard access is denied | Token is invalid/expired or RBAC is missing | Generate a new short-lived token and review the Dashboard role binding |
+
+Useful diagnostic commands:
+
+~~~bash
+kubectl get nodes -o wide
+kubectl get pods -A -o wide
+kubectl get events --sort-by=.lastTimestamp
+kubectl get statefulset mysql
+kubectl get services,endpoints
+kubectl get pvc,pv
+kubectl describe pod mysql-0
+kubectl logs mysql-0 -c mysql
+kubectl logs mysql-1 -c xtrabackup
+~~~
+
+Replace example Pod and claim names with the actual resource names. A command that shows no endpoints or no events can itself help narrow down the problem.
+
+---
+
+## Security and Operational Considerations
+
+- Use a supported MySQL version, non-empty credentials, and Kubernetes Secrets or an external secret manager for actual workloads.
+- Use least-privilege RBAC. Do not leave a cluster-admin binding on the Dashboard account after the lab.
+- Keep the Dashboard behind private access controls. Avoid binding administrative port-forwards to all network interfaces unless the training platform explicitly requires it and network access is restricted.
+- Avoid exposing database ports to the public internet. Prefer ClusterIP or a deliberately configured internal load balancer for private database traffic.
+- Use the AWS EBS CSI driver on modern Kubernetes clusters; the legacy in-tree provisioner in the training manifest is not supported on Kubernetes v1.27 and later.
+- Validate storage availability zones and topology before rescheduling Pods that use EBS volumes.
+- Configure backups and test restore procedures. A PersistentVolume alone is not a database backup.
+- Add resource requests and limits, readiness/liveness probes suited to the application, Pod disruption policies, monitoring, and tested recovery procedures for production.
+- Review storage and load balancer costs, and remove test resources after the lab.
+
+## Cleanup
+
+Follow the training provider's cleanup instructions first, especially if the environment is managed for you.
+
+For the standalone resources created by this exercise, remove the Dashboard access created above and any optional load-balancer exposure:
+
+~~~bash
+kubectl delete clusterrolebinding dashboard-admin --ignore-not-found
+kubectl delete serviceaccount dashboard-admin -n kubernetes-dashboard --ignore-not-found
+kubectl patch service mysql-read --type merge -p '{"spec":{"type":"ClusterIP"}}'
+~~~
+
+If the lab is ending and the database workload is no longer needed, inspect the StatefulSet and its PVCs before deleting anything:
+
+~~~bash
+kubectl get statefulset mysql
+kubectl get pvc
+kubectl get pv
+~~~
+
+Only delete the StatefulSet and storage after confirming that no data must be retained. Deleting PVCs or PVs can permanently delete the database files or backing EBS volumes:
+
+~~~bash
+kubectl delete statefulset mysql
+kubectl delete service mysql mysql-read
+kubectl delete configmap mysql
+kubectl delete storageclass general
+~~~
+
+PVCs from a StatefulSet may remain after the StatefulSet is deleted. Check and delete claims deliberately only when their data is no longer required:
+
+~~~bash
+kubectl get pvc
+# Delete only the lab PVCs after confirming their data is disposable:
+# kubectl delete pvc data-mysql-0 data-mysql-1 data-mysql-2
+~~~
+
+If the lab created AWS load balancers and EBS volumes, verify that they are removed according to the service and PV reclaim policies. A StorageClass with a Retain reclaim policy can leave EBS volumes behind. Check the AWS console and billing tools after cleanup.
+
+## Key Takeaways
+
+This lab demonstrates that a stateful Kubernetes workload involves more than keeping Pods running:
+
+- StatefulSets provide stable Pod identities and ordered lifecycle behavior.
+- Headless Services provide DNS identities for individual StatefulSet Pods.
+- PVCs and PVs separate persistent data lifecycle from Pod lifecycle.
+- StorageClass and the appropriate storage driver provide dynamic storage provisioning.
+- Asynchronous replication can improve read capacity but introduces replication lag.
+- Kubernetes can recreate Pods after deletion or eviction, but storage topology still matters.
+- Services and AWS load balancers influence how database endpoints are reached.
+- Dashboard access, RBAC, credentials, external exposure, and cleanup must be handled carefully.
+
+## References
+
+- [Kubernetes StatefulSets](https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/)
+- [Kubernetes Services](https://kubernetes.io/docs/concepts/services-networking/service/)
+- [Persistent Volumes and Claims](https://kubernetes.io/docs/concepts/storage/persistent-volumes/)
+- [Storage Classes](https://kubernetes.io/docs/concepts/storage/storage-classes/)
+- [AWS EBS CSI Driver](https://github.com/kubernetes-sigs/aws-ebs-csi-driver)
+- [Kubernetes Dashboard](https://kubernetes.io/docs/tasks/access-application-cluster/web-ui-dashboard/)
+- [MySQL Documentation](https://dev.mysql.com/doc/)
+- [Kubernetes kubectl reference](https://kubernetes.io/docs/reference/kubectl/)
+
+## Disclaimer
+
+This README documents a hands-on training exercise. The sample MySQL version, replication approach, AWS EBS provisioner, and Dashboard permissions reflect a legacy lab environment. Validate all manifests and commands for your Kubernetes version before using them. Never use the lab's empty-password configuration or cluster-admin Dashboard binding in production.
