@@ -534,3 +534,209 @@ kubectl get statefulset mysql
 
 **Expected result:** Three ordered Pods named mysql-0, mysql-1, and mysql-2, each with a PVC created from the volume claim template. The exact status depends on successful image pulls, node capacity, storage provisioning, and replication initialization.
 
+
+## Step 4: Work with the Stateful Application
+
+This step checks database connectivity, confirms that reads can reach different MySQL Pods, simulates node maintenance, scales the StatefulSet, and demonstrates Service exposure.
+
+### 4.1 Create test data on the primary
+
+Use a temporary MySQL client Pod to connect to the primary through its stable DNS name:
+
+~~~bash
+kubectl run mysql-client \
+  --image=mysql:5.7 \
+  -i -t --rm --restart=Never -- \
+  /usr/bin/mysql -h mysql-0.mysql \
+  -e "CREATE DATABASE mydb; CREATE TABLE mydb.notes (note VARCHAR(250)); INSERT INTO mydb.notes VALUES ('Kubernetes StatefulSet lab');"
+~~~
+
+This creates a database named mydb, a notes table, and one record. The example assumes the training containers use the empty root password configuration described earlier.
+
+If the client cannot connect, inspect the StatefulSet Pods, Services, endpoints, readiness, and logs.
+
+### 4.2 Query the read Service
+
+~~~bash
+kubectl run mysql-client \
+  --image=mysql:5.7 \
+  -i -t --rm --restart=Never -- \
+  /usr/bin/mysql -h mysql-read \
+  -e "SELECT * FROM mydb.notes"
+~~~
+
+The mysql-read Service selects ready Pods labeled app=mysql. Because replication is asynchronous, a recently written row may not be visible immediately on every replica.
+
+### 4.3 Observe which MySQL server answers reads
+
+~~~bash
+kubectl run mysql-client-loop \
+  --image=mysql:5.7 \
+  -i -t --rm --restart=Never -- \
+  bash -ic "while sleep 1; do /usr/bin/mysql -h mysql-read -e 'SELECT @@server_id'; done"
+~~~
+
+The loop queries the server ID once per second through mysql-read. The primary's ID is 100 and replicas have IDs derived from their StatefulSet ordinals.
+
+Press Ctrl+C to stop. Depending on endpoints and replica readiness, you may not observe every ID immediately.
+
+### 4.4 Inspect Pod placement
+
+~~~bash
+kubectl get pods -l app=mysql -o wide
+~~~
+
+The output shows the node hosting each Pod. Actual placement depends on worker capacity, Pod constraints, storage availability zones, and scheduler decisions; Kubernetes does not guarantee an even distribution without suitable topology constraints.
+
+### 4.5 Drain the node running mysql-2
+
+Draining simulates taking a node out of service for maintenance. Run this only in the lab cluster because the command can interrupt other workloads on that node.
+
+~~~bash
+node=$(kubectl get pod mysql-2 -o jsonpath='{.spec.nodeName}')
+echo "$node"
+kubectl drain "$node" --force --delete-emptydir-data --ignore-daemonsets
+~~~
+
+Explanation:
+
+- The first command finds the node currently hosting mysql-2.
+- kubectl drain marks the node unschedulable and evicts eligible Pods.
+- --ignore-daemonsets skips DaemonSet-managed Pods.
+- --delete-emptydir-data allows eviction of Pods that use emptyDir volumes, whose temporary contents will be lost.
+- --force allows drain to proceed with certain unmanaged Pods; do not use it casually on production nodes.
+
+Check that the PVC and PV remain bound and that the Pod can reattach its volume on an eligible node.
+
+### 4.6 Observe rescheduling and uncordon the node
+
+~~~bash
+kubectl get pods -l app=mysql -o wide --watch
+~~~
+
+Wait for the affected Pod to be recreated and become ready, then press Ctrl+C.
+
+Allow scheduling on the node again:
+
+~~~bash
+kubectl uncordon "$node"
+kubectl get nodes
+~~~
+
+If the Pod remains pending, inspect events, PVC/PV status, the EBS volume's availability zone, and EBS driver logs.
+
+### 4.7 Delete a Pod to observe StatefulSet recovery
+
+~~~bash
+kubectl delete pod mysql-2
+kubectl get pod mysql-2 -o wide --watch
+~~~
+
+Press Ctrl+C after observing the replacement. The StatefulSet controller attempts to maintain its desired replica count and recreate the missing Pod with the same ordinal and stable identity.
+
+Deleting a Pod does not automatically delete the PVC created from its volume claim template. This illustrates the difference between Pod lifecycle and persistent storage lifecycle.
+
+### 4.8 Scale the StatefulSet to five replicas
+
+~~~bash
+kubectl scale statefulset mysql --replicas=5
+kubectl get pods -l app=mysql --watch
+~~~
+
+Wait for mysql-3 and mysql-4 to initialize, then press Ctrl+C. Check the replicas and storage:
+
+~~~bash
+kubectl get statefulset mysql
+kubectl get pods -l app=mysql -o wide
+kubectl get pvc
+~~~
+
+Each new ordinal should receive a PVC from the claim template. The new replicas must initialize and start replicating before they become ready.
+
+### 4.9 Verify server IDs and replicated data
+
+Run the server ID loop again:
+
+~~~bash
+kubectl run mysql-client-loop \
+  --image=mysql:5.7 \
+  -i -t --rm --restart=Never -- \
+  bash -ic "while sleep 1; do /usr/bin/mysql -h mysql-read -e 'SELECT @@server_id'; done"
+~~~
+
+Press Ctrl+C after observing the results.
+
+Query the notes table through mysql-4 directly:
+
+~~~bash
+kubectl run mysql-client \
+  --image=mysql:5.7 \
+  -i -t --rm --restart=Never -- \
+  /usr/bin/mysql -h mysql-4.mysql \
+  -e "SELECT * FROM mydb.notes"
+~~~
+
+If the table or row is not present yet, inspect replica initialization and replication status. The replication model in this lab is asynchronous, so replicas may lag behind the primary.
+
+### 4.10 Inspect the mysql-read Service
+
+~~~bash
+kubectl get service mysql-read
+kubectl describe service mysql-read
+~~~
+
+The Service is initially type ClusterIP and is reachable from inside the cluster.
+
+### 4.11 Optional: Expose the read Service through an AWS LoadBalancer
+
+**Security warning:** This exposes the MySQL read endpoint through a load balancer. Do this only if explicitly required by the lab, only in a disposable environment, and with appropriate network restrictions. Do not expose an unauthenticated database to the public internet.
+
+The original lab changes mysql-read to type LoadBalancer. Patch the Service rather than appending lines to the YAML file:
+
+~~~bash
+kubectl patch service mysql-read --type merge \
+  -p '{"spec":{"type":"LoadBalancer"}}'
+kubectl get service mysql-read --watch
+~~~
+
+When provisioning completes, inspect the Service:
+
+~~~bash
+kubectl describe service mysql-read
+kubectl get service mysql-read -o wide
+~~~
+
+Retrieve the external hostname:
+
+~~~bash
+kubectl get service mysql-read -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+echo
+~~~
+
+Provisioning and behavior depend on the cluster's AWS integration. If the hostname remains empty, inspect Service events and the cloud-controller/load-balancer integration.
+
+For a safer lab, use an internal load balancer if supported and access is needed only from the VPC. If external access is used, ensure network restrictions are in place.
+
+### 4.12 Test the load balancer (only if intentionally exposed)
+
+Set the hostname returned by the previous command:
+
+~~~bash
+load_balancer="<load-balancer-hostname>"
+~~~
+
+Then connect with a temporary client Pod:
+
+~~~bash
+kubectl run mysql-client-loop \
+  --image=mysql:5.7 \
+  -i -t --rm --restart=Never -- \
+  bash -ic "while sleep 1; do /usr/bin/mysql -h $load_balancer -e 'SELECT @@server_id'; done"
+~~~
+
+If the load balancer was just created, it may take time for targets to register and become healthy. Press Ctrl+C to stop the loop when you have collected enough observations.
+
+### Step 4 Summary
+
+This step demonstrated direct access to the primary using stable DNS, reads through a Service, node draining, Pod recovery, scaling from three to five replicas, persistent volume claim behavior, and optional load balancer provisioning.
+
