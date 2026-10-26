@@ -745,6 +745,8 @@ This step demonstrated direct access to the primary using stable DNS, reads thro
 
 The training cluster includes Kubernetes Dashboard resources in the kubernetes-dashboard namespace. Dashboard provides a graphical view of resources such as Pods, StatefulSets, Services, and PersistentVolumes.
 
+> **Maintenance note (October 2026):** The original Kubernetes Dashboard project was archived in January 2026 and is no longer maintained. This step is retained to match the pre-provisioned training lab; do not install the archived Dashboard for a new environment. The Kubernetes project recommends considering [Headlamp](https://github.com/kubernetes-sigs/headlamp) for new installations.
+
 ### 5.1 Create a Dashboard service account for the lab
 
 **Security warning:** The original training exercise binds the cluster-admin role, which grants broad privileges across the cluster. Use this only in the disposable lab. For real environments, use the least-privilege role needed for the task and a supported authentication approach.
@@ -987,7 +989,8 @@ This lab demonstrates that a stateful Kubernetes workload involves more than kee
 - [Persistent Volumes and Claims](https://kubernetes.io/docs/concepts/storage/persistent-volumes/)
 - [Storage Classes](https://kubernetes.io/docs/concepts/storage/storage-classes/)
 - [AWS EBS CSI Driver](https://github.com/kubernetes-sigs/aws-ebs-csi-driver)
-- [Kubernetes Dashboard](https://kubernetes.io/docs/tasks/access-application-cluster/web-ui-dashboard/)
+- [Kubernetes Dashboard documentation and maintenance notice](https://kubernetes.io/docs/tasks/access-application-cluster/web-ui-dashboard/)
+- [Headlamp Kubernetes UI](https://github.com/kubernetes-sigs/headlamp)
 - [MySQL Documentation](https://dev.mysql.com/doc/)
 - [Kubernetes kubectl reference](https://kubernetes.io/docs/reference/kubectl/)
 
